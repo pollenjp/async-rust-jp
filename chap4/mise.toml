@@ -1,0 +1,6 @@
+[tools]
+rust = "1.90.0"
+
+[tasks.my1]
+env = { RUST_BACKTRACE = "full" }
+run = "cargo run --example my1"
