@@ -1,7 +1,7 @@
 use mio::net::{TcpListener, TcpStream};
 use mio::{Events, Interest, Poll as MioPoll, Token};
 use std::error::Error;
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 use std::time::Duration;
 
 use async_task::{Runnable, Task};
@@ -164,6 +164,7 @@ impl Future for ServerFuture {
         for event in events.iter() {
             if event.token() == SERVER && event.is_readable() {
                 let (mut stream, _) = self.server.accept().unwrap();
+                // let mut buffer = [0u8; 1024];
                 let mut buffer = [0u8; 1024];
                 let mut received_data = Vec::new();
 
@@ -174,6 +175,11 @@ impl Future for ServerFuture {
                             received_data.extend_from_slice(&buffer[..n]);
                         }
                         Ok(_) => {
+                            println!("0 byte received");
+                            break;
+                        }
+                        Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                            eprintln!("Would block");
                             break;
                         }
                         Err(e) => {
@@ -184,15 +190,20 @@ impl Future for ServerFuture {
                 }
                 if !received_data.is_empty() {
                     let received_str = String::from_utf8_lossy(&received_data);
-                    return Poll::Ready(received_str.to_string());
+                    spawn_task!(print_data(received_str.to_string())).detach();
                 }
                 cx.waker().wake_by_ref();
                 return Poll::Pending;
             }
         }
         cx.waker().wake_by_ref();
-        return Poll::Pending;
+        Poll::Pending
     }
+}
+
+async fn print_data(data: String) {
+    println!("received data size: {}", data.as_bytes().len());
+    println!("received data: {}", data);
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -217,13 +228,24 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     for event in events.iter() {
         if event.token() == CLIENT && event.is_writable() {
-            let message = "that's so dingo!\n";
-            let _ = stream.write_all(message.as_bytes());
+            let messages = (0..100)
+                .map(|i| format!("that's so dingo! {}", i))
+                .collect::<Vec<String>>()
+                .chunks(7)
+                .map(|chunk| chunk.join("\t"))
+                .collect::<Vec<String>>()
+                .join("\n")
+                + "\n--------------------------------\n";
+            println!("sending messages: {}", messages);
+            // let messages = "that's so dingo!\n";
+            for i in 0..2 {
+                println!("send cnt: {} / buf size: {}", i, messages.as_bytes().len());
+                let _ = stream.write_all(messages.as_bytes());
+            }
         }
     }
 
-    let outcome = future::block_on(test);
-    println!("outcome: {}", outcome);
+    let _ = future::block_on(test);
 
     Ok(())
 }
